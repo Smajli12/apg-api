@@ -131,8 +131,13 @@ app.post('/ingest', (req,res)=>{
   if (!okDomain) return res.status(403).json({ error: 'host not allowed for this client' });
 
   const row = JSON.stringify({ receivedAt: new Date().toISOString(), clientId, siteId, ...payload }) + '\n';
-  fs.appendFile(ndjsonPath, row, ()=>{});
-
+  try {
+  fs.appendFileSync(ndjsonPath, row); // siguran upis
+  console.log('APPENDED', ndjsonPath);
+} catch (err) {
+  console.error('NDJSON append error:', err);
+}
+  
   if (!payload.gptLoaded) notifySlack(`⚠️ GPT not loaded on ${payload.host} ${payload.site}`);
   if (payload.wrongNetworkSlots?.length) notifySlack(`❌ Wrong networkId on ${payload.host}: ${JSON.stringify(payload.wrongNetworkSlots).slice(0,400)}`);
   if (payload.notRegisteredInGPT?.length) notifySlack(`🔎 Not registered in GPT: ${payload.notRegisteredInGPT.join(', ').slice(0,400)}`);
@@ -292,4 +297,5 @@ small{color:#666}
 app.listen(PORT, () => {
   console.log(`APG API on :${PORT}`);
 });
+
 
