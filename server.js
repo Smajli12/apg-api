@@ -74,14 +74,15 @@ const dataDir = path.join(__dirname, "data");
 fs.mkdirSync(dataDir, { recursive: true });
 const ndjsonPath = path.join(dataDir, "events.ndjson");
 
-// ---------- Token helpers ----------
+// ---------- Token helpers (NO siteId) ----------
 function verifyBearer(req) {
   const h = req.headers.authorization || "";
   const m = h.match(/^Bearer (.+)$/i);
   return m ? m[1] : null;
 }
-function issueSiteToken(clientId, siteId) {
-  return jwt.sign({ clientId, siteId }, JWT_SECRET, { expiresIn: "365d" });
+function issueSiteToken(clientId) {
+  // token only carries clientId now
+  return jwt.sign({ clientId }, JWT_SECRET, { expiresIn: "365d" });
 }
 function decodeSiteToken(token) {
   try {
@@ -91,7 +92,7 @@ function decodeSiteToken(token) {
   }
 }
 
-// ---------- Payload: issue-based (matches your current GTM tag) ----------
+// ---------- Payload: issue-based (matches your GTM tag) ----------
 const IssuePayloadSchema = z.object({
   clientId: z.string(),
   host: z.string(),
@@ -107,10 +108,19 @@ const IssuePayloadSchema = z.object({
   adUnitPath: z.string().optional().default(""),
   networkId: z.string().optional().default(""),
   renderedSize: z.string().optional(),
-  definedSizes: z.array(z.string()).optional()
+  definedSizes: z.array(z.string()).optional(),
+
+  // ---- revenue-at-risk (optional, from tag) ----
+  estimationCurrency: z.string().optional(),
+  estimationWindowHours: z.number().optional(),
+  assumedRpm: z.number().optional(),
+  assumedImpressionsAtRisk: z.number().optional(),
+  estimatedRevenueAtRisk: z.number().optional(),
+  estimationMethod: z.string().optional()
 });
 
 // ---------- Google Sheet sender (via Apps Script Web App) ----------
+// Note: Requires Node 18+ for global fetch (Render/Railway usually ok)
 async function postToSheet(row) {
   if (!SHEET_WEBHOOK_URL) return;
   try {
@@ -129,19 +139,19 @@ async function postToSheet(row) {
 // ---------- Health ----------
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// ---------- Admin: issue token ----------
+// ---------- Admin: issue token (NO siteId) ----------
 app.post("/admin/issue-token", (req, res) => {
   if ((req.headers["x-admin-key"] || "") !== ADMIN_KEY) {
     return res.status(403).json({ error: "forbidden" });
   }
-  const { clientId, siteId } = req.body || {};
-  if (!clientId || !siteId) return res.status(400).json({ error: "clientId and siteId required" });
+  const { clientId } = req.body || {};
+  if (!clientId) return res.status(400).json({ error: "clientId required" });
 
   const client = CLIENTS[clientId];
   if (!client) return res.status(400).json({ error: "unknown clientId" });
   if (client.active === false) return res.status(400).json({ error: "client inactive" });
 
-  return res.json({ token: issueSiteToken(clientId, siteId) });
+  return res.json({ token: issueSiteToken(clientId) });
 });
 
 // ---------- Ingest ----------
@@ -152,7 +162,7 @@ app.post("/ingest", async (req, res) => {
   const decoded = decodeSiteToken(token);
   if (!decoded) return res.status(401).json({ error: "invalid token" });
 
-  const { clientId, siteId } = decoded;
+  const { clientId } = decoded;
   const client = CLIENTS[clientId];
   if (!client || client.active === false) return res.status(403).json({ error: "client disabled" });
 
@@ -171,7 +181,6 @@ app.post("/ingest", async (req, res) => {
   const event = {
     receivedAt: new Date().toISOString(),
     clientId,
-    siteId,
     ...payload
   };
 
@@ -183,11 +192,10 @@ app.post("/ingest", async (req, res) => {
   }
 
   // Send to Google Sheet (optional)
-  // Choose the columns you want in Sheets:
+  // Column order you should mirror in the Sheet header:
   await postToSheet([
     event.receivedAt,
     event.clientId,
-    event.siteId,
     event.host,
     event.pageUrl,
     event.issueType,
@@ -195,7 +203,15 @@ app.post("/ingest", async (req, res) => {
     event.slotId || "",
     event.adUnitPath || "",
     event.networkId || "",
-    event.tagVersion || ""
+    event.tagVersion || "",
+
+    // revenue-at-risk (optional)
+    event.estimationCurrency || "",
+    event.estimationWindowHours ?? "",
+    event.assumedRpm ?? "",
+    event.assumedImpressionsAtRisk ?? "",
+    event.estimatedRevenueAtRisk ?? "",
+    event.estimationMethod || ""
   ]);
 
   return res.json({ ok: true });
@@ -292,6 +308,7 @@ app.get("/report", (req, res) => {
       <td>${escape(r.issueType)}</td>
       <td>${escape(r.slotId || "")}</td>
       <td>${escape(r.adUnitPath || "")}</td>
+      <td>${escape(r.estimatedRevenueAtRisk ?? "")}</td>
     </tr>`).join("");
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -321,9 +338,9 @@ small{color:#666}
 
 <table>
 <thead><tr>
-  <th>Timestamp</th><th>Page</th><th>Host</th><th>Issue</th><th>Slot</th><th>AdUnitPath</th>
+  <th>Timestamp</th><th>Page</th><th>Host</th><th>Issue</th><th>Slot</th><th>AdUnitPath</th><th>Est. € at risk</th>
 </tr></thead>
-<tbody>${tr || '<tr><td colspan="6">No data</td></tr>'}</tbody>
+<tbody>${tr || '<tr><td colspan="7">No data</td></tr>'}</tbody>
 </table>
 </body></html>`);
 });
@@ -331,4 +348,3 @@ small{color:#666}
 app.listen(PORT, () => {
   console.log(`APG API on :${PORT}`);
 });
-
