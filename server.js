@@ -22,17 +22,10 @@ const {
 } = process.env;
 
 const CLIENTS = JSON.parse(CLIENTS_JSON);
-
 const app = express();
 
-/* ======================================================
-   🔧 RENDER FIX #1 — TRUST PROXY (OBAVEZNO)
-   ====================================================== */
+/* ================== RENDER FIXES ================== */
 app.set("trust proxy", 1);
-
-/* ======================================================
-   🔧 RENDER FIX #2 — ROOT ROUTE
-   ====================================================== */
 app.get("/", (_req, res) =>
   res.status(200).send("APG API running. Try /health")
 );
@@ -54,7 +47,6 @@ function originAllowed(origin) {
   try {
     const u = new URL(origin);
     const h = u.hostname;
-
     return Object.values(CLIENTS).some((c) => {
       if (!c || c.active === false) return false;
       return (c.domains || []).some(
@@ -115,7 +107,7 @@ function decodeSiteToken(token) {
   }
 }
 
-/* ================== SCHEMA ================== */
+/* ================== SCHEMA (UPDATED) ================== */
 const IssuePayloadSchema = z.object({
   clientId: z.string(),
   host: z.string(),
@@ -139,12 +131,17 @@ const IssuePayloadSchema = z.object({
   renderedSize: z.string().optional(),
   definedSizes: z.array(z.string()).optional(),
 
+  // 🔹 NEW revenue model fields
   estimationCurrency: z.string().optional(),
-  estimationWindowHours: z.number().optional(),
+
   assumedRpm: z.number().optional(),
-  assumedImpressionsAtRisk: z.number().optional(),
-  estimatedRevenueAtRisk: z.number().optional(),
-  estimationMethod: z.string().optional()
+  assumedImpressionsPerHour: z.number().optional(),
+
+  estimatedHourlyRevenueRisk: z.number().optional(),
+  estimatedDailyRevenueRisk: z.number().optional(),
+
+  estimationMethod: z.string().optional(),
+  revenueAssumptionsNote: z.string().optional()
 });
 
 /* ================== SHEET SENDER ================== */
@@ -229,12 +226,15 @@ app.post("/ingest", async (req, res) => {
     event.adUnitPath || "",
     event.networkId || "",
     event.tagVersion || "",
+
+    // 🔹 NEW revenue columns
     event.estimationCurrency || "",
-    event.estimationWindowHours ?? "",
     event.assumedRpm ?? "",
-    event.assumedImpressionsAtRisk ?? "",
-    event.estimatedRevenueAtRisk ?? "",
-    event.estimationMethod || ""
+    event.assumedImpressionsPerHour ?? "",
+    event.estimatedHourlyRevenueRisk ?? "",
+    event.estimatedDailyRevenueRisk ?? "",
+    event.estimationMethod || "",
+    event.revenueAssumptionsNote || ""
   ]);
 
   return res.json({ ok: true });
