@@ -107,12 +107,13 @@ function decodeSiteToken(token) {
   }
 }
 
-/* ================== SCHEMA (UPDATED) ================== */
+/* ================== SCHEMA (FINAL) ================== */
 const IssuePayloadSchema = z.object({
   clientId: z.string(),
   host: z.string(),
   pageUrl: z.string().url(),
   timestamp: z.string(),
+
   tagVersion: z.string().optional().default(""),
   userAgent: z.string().optional().default(""),
 
@@ -129,9 +130,8 @@ const IssuePayloadSchema = z.object({
   adUnitPath: z.string().optional().default(""),
   networkId: z.string().optional().default(""),
   renderedSize: z.string().optional(),
-  definedSizes: z.array(z.string()).optional(),
 
-  // 🔹 NEW revenue model fields
+  /* ===== Revenue model ===== */
   estimationCurrency: z.string().optional(),
 
   assumedRpm: z.number().optional(),
@@ -141,7 +141,11 @@ const IssuePayloadSchema = z.object({
   estimatedDailyRevenueRisk: z.number().optional(),
 
   estimationMethod: z.string().optional(),
-  revenueAssumptionsNote: z.string().optional()
+  revenueAssumptionsNote: z.string().optional(),
+
+  /* ===== Retry / scan metadata ===== */
+  scanAttempt: z.number().optional(),
+  scanDelayMs: z.number().optional()
 });
 
 /* ================== SHEET SENDER ================== */
@@ -216,6 +220,7 @@ app.post("/ingest", async (req, res) => {
   fs.appendFileSync(ndjsonPath, JSON.stringify(event) + "\n");
 
   await postToSheet([
+    /* Core */
     event.receivedAt,
     event.clientId,
     event.host,
@@ -227,14 +232,18 @@ app.post("/ingest", async (req, res) => {
     event.networkId || "",
     event.tagVersion || "",
 
-    // 🔹 NEW revenue columns
+    /* Revenue */
     event.estimationCurrency || "",
     event.assumedRpm ?? "",
     event.assumedImpressionsPerHour ?? "",
     event.estimatedHourlyRevenueRisk ?? "",
     event.estimatedDailyRevenueRisk ?? "",
     event.estimationMethod || "",
-    event.revenueAssumptionsNote || ""
+    event.revenueAssumptionsNote || "",
+
+    /* Retry metadata */
+    event.scanAttempt ?? "",
+    event.scanDelayMs ?? ""
   ]);
 
   return res.json({ ok: true });
